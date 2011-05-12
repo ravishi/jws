@@ -1,17 +1,103 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import optparse
-import os
-import tempfile
 import urllib
 import urllib2
 
+def program_exists(program):
+    import os
+    def is_exe(fpath):
+        return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+    for path in os.environ["PATH"].split(os.pathsep):
+        exe_file = os.path.join(path, program)
+        if is_exe(exe_file):
+            return True
+    return False
+
+def autodetect_backend(audio_file, param):
+    if program_exists("mplayer"):
+        external_backend(audio_file)
+        return
+    
+    try:
+        import mad, ao
+    except ImportError:
+        pass
+    else:
+        libao_backend(audio_file)
+        return
+        
+    defaultapp_backend(audio_file)
+
+def libao_backend(audio_file, libao_backend=None):
+   import mad, ao, sys
+   backend_map = {'darwin':'macosx',
+                  'win32':'wmm',
+                  'linux2':'alsa'}
+
+   if not libao_backend:
+       libao_backend = backend_map[sys.platform]
+
+   mf = mad.MadFile(audio_file)
+   dev = ao.AudioDevice(libao_backend)
+
+   while True:
+       buf = mf.read()
+       if buf is None:
+           break
+       dev.play(buf, len(buf))
+
+def external_backend(audio_file, command=None):
+   import os,tempfile
+
+   tf = tempfile.NamedTemporaryFile(delete=False)
+   tf.write(audio_file.read())
+   tf.close()
+
+   if not command:
+       command = 'mplayer %s >/dev/null 2>&1'
+
+   if command.find('%s') == -1:
+       command += ' %s'
+
+   os.system(command % tf.name)
+   os.unlink(tf.name)
+
+def file_backend(audio_file, filename=None):
+   if not filename:
+       filename = 'o.mp3'
+   ef = open(filename,'w')
+   ef.write(audio_file.read())
+   ef.close()
+
+def stdout_backend(audio_file, *param):
+   print audio_file.read()
+
+def defaultapp_backend(audio_file, *param):
+   import os,tempfile, sys
+   command = {'darwin':'open %s',
+              'win32':'cmd /c "start %s"',
+              'linux2':'xdg-open %s'}
+
+   tf = tempfile.NamedTemporaryFile(delete=False)
+   tf.write(audio_file.read())
+   tf.close()
+   os.system(command[sys.platform] % tf.name)
+
+def help_backend(*param):
+    backends = [x.replace('_backend','') for x in globals().keys() if x.endswith('_backend')]
+    print "Avaiable backends are: %s" %(", ".join(backends))
+    
 def main():
-    print "Just wanna say [version 1.0]\nRequires mplayer\n"
+    print "Just wanna say [version 2.0]\n"
     usage = 'usage: %prog [options] [phrases]'
     option_list = [
         optparse.make_option('-l', '--language',
             action='store', type='string', dest='language', default='pt'),
+        optparse.make_option('-b', '--backend',
+            action='store', type='string', dest='backend', default='autodetect'),
+        optparse.make_option('-o', '--backend-options',
+            action='store', type='string', dest='backend_options', default=None),
     ]
     parser = optparse.OptionParser(usage=usage, option_list=option_list)
 
@@ -29,15 +115,11 @@ def main():
     request.add_header('Accept-Language', 'pt-br,pt;q=0.8,en-us;q=0.5,en;q=0.3')
 
     webfile = urllib2.urlopen(request)
-    localfile = tempfile.NamedTemporaryFile(delete=False)
-    localfile.write(webfile.read())
-
+    backend = globals()['%s_backend'%(options.backend)]
+    
+    backend(webfile, options.backend_options)
+    
     webfile.close()
-    localfile.close()
-    print "Playing..."
-    os.system('mplayer %s >/dev/null 2>&1' % localfile.name)
-    os.unlink(localfile.name)
-    print "Done."
 
 
 if __name__ == '__main__':
