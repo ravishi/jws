@@ -15,6 +15,14 @@ def program_exists(program):
     return False
 
 def autodetect_backend(audio_file, param):
+    if program_exists("mpg123"):
+        external_backend(audio_file, "mpg123 %s >/dev/null 2>&1")
+        return
+        
+    if program_exists("playsound"):
+        external_backend(audio_file, "playsound %s >/dev/null 2>&1")
+        return
+        
     if program_exists("mplayer"):
         external_backend(audio_file)
         return
