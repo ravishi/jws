@@ -135,6 +135,7 @@ class PyAudioBackend(Backend):
 
 
 class AoBackend(Backend):
+    """ Um backend que utiliza o libao para tocar o áudio. """
     def __init__(self, backend=None):
         self.backend = backend
 
@@ -188,6 +189,11 @@ def autodetect_backend():
     else:
         return PyAudioBackend()
 
+    # test for external programs
+    cmd = autodetect_external_program()
+    if cmd is not None:
+        return ExternalProgramBackend(cmd)
+
     # test for ao
     try:
         import ao
@@ -195,11 +201,6 @@ def autodetect_backend():
         pass
     else:
         return AoBackend()
-
-    # test for external programs
-    cmd = autodetect_external_program()
-    if cmd is not None:
-        return ExternalProgramBackend(cmd)
 
     # usar o programa padrão do sistema para tocar áudio
     print (u'Nenhum backend foi encontrado. Tentaremos tocar o áudio'
@@ -211,15 +212,28 @@ def main():
     print "Just wanna say [version 2.0]\n"
     usage = 'usage: %prog [options] [phrases]'
     option_list = [
-        optparse.make_option('-l', '--language',
-            action='store', type='string', dest='language', default='pt'),
-        optparse.make_option('-b', '--backend',
-            action='store', type='string', dest='backend', default=None),
-        optparse.make_option('-o', '--backend-options',
-            action='store', type='string', dest='backend_options', default=None),
+        optparse.make_option('-h', '--help', action='store_true',
+            dest='help', default=False, help=u'Show this help'),
+        optparse.make_option('-l', '--language', action='store',
+            type='string', dest='language', default='pt',
+            help=u'Change the input language'),
+        optparse.make_option('-b', '--backend', action='store',
+            type='string', dest='backend', default=None,
+            help=u'Specify the audio output mean'),
+        optparse.make_option('-o', '--backend-options', action='store',
+            type='string', dest='backend_options', default=None,
+            help=u'Options to be passed to the backend'),
     ]
-    parser = optparse.OptionParser(usage=usage, option_list=option_list)
+    parser = optparse.OptionParser(usage=usage, option_list=option_list, add_help_option=False)
     options, phrases = parser.parse_args()
+
+    if options.help:
+        parser.print_help()
+        print
+        print u'Available backends:'
+        for cls in Backend.__subclasses__():
+            print '%s %s' % (cls.__name__[:-len('Backend')].ljust(20), (cls.__doc__ or u'No description given').strip())
+        return
 
     if options.backend is not None:
         backend = globals().get('%sBackend' % (options.backend,))(options.backend_options)
@@ -244,7 +258,6 @@ def main():
         backend.play(fp)
 
         fp.close()
-        storage.release(identifier)
     else:
         backend.play(lfp)
         lfp.close()
