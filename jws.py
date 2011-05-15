@@ -47,7 +47,6 @@ class Storage(object):
 
 class Backend(object):
     named_file_required = None
-    unavailable_message = ""
 
     def __init__(self, *args):
         pass
@@ -57,7 +56,23 @@ class Backend(object):
    
     @staticmethod
     def available():
+        """ Subclasses must extend this method to tell the caller if they are
+        available for use or not. """
         return True
+
+    @classmethod
+    def name(cls):
+        return cls.__name__[:-len('_backend')]
+
+    @classmethod
+    def info(cls):
+        return cls.__doc__.strip()
+
+    @classmethod
+    def availability_info(cls):
+        doc = cls.available.__doc__
+        if not doc is Backend.available.__doc__:
+            return doc.strip()
 
 class DefaultLoader(Loader):
     def load(self, text, language):
@@ -107,7 +122,6 @@ class TempfileStorage(Storage):
 class appkit_backend(Backend):
     """ An Apple's AppKit powered backend. """
     named_file_required = True
-    unavailable_message = "Requires Apple AppKit available on MacOS X"
 
     def play(self, fp):
         from AppKit import NSSound
@@ -120,6 +134,7 @@ class appkit_backend(Backend):
 
     @classmethod
     def available(cls):
+        """ Requires Apple AppKit available on MacOS X. """
         if not hasattr(cls,"_available"):
             try:
                 import AppKit
@@ -161,7 +176,6 @@ class defaultapp_backend(external_backend):
 
 class pyaudio_backend(Backend):
     """ A PortAudio and PyMAD powered backend """
-    unavailable_message = "Requires PyMad (http://spacepants.org/src/pymad/) and PyAudio (http://people.csail.mit.edu/hubert/pyaudio/)"
 
     def play(self, fp):
         import mad, pyaudio
@@ -183,9 +197,10 @@ class pyaudio_backend(Backend):
 
     @classmethod
     def available(cls):
+        """ Requires PyMad (http://spacepants.org/src/pymad/) and PyAudio (http://people.csail.mit.edu/hubert/pyaudio/). """
         if not hasattr(cls,"_available"):
             try:
-                import mad,pyaudio
+                import mad, pyaudio
             except ImportError:
                 cls._available = False
             else:
@@ -194,8 +209,7 @@ class pyaudio_backend(Backend):
         return cls._available
 
 class ao_backend(Backend):
-    """A LibAO and PyMAD powered backend """
-    unavailable_message = "Requires PyMad (http://spacepants.org/src/pymad/) and PyAO (http://ekyo.nerim.net/software/pyogg/)"
+    """A LibAO and PyMAD powered backend. """
 
     def __init__(self, backend=None):
         self.backend = backend
@@ -228,6 +242,7 @@ class ao_backend(Backend):
 
     @classmethod
     def available(cls):
+        """ Requires PyMad (http://spacepants.org/src/pymad/) and PyAO (http://ekyo.nerim.net/software/pyogg/). """
         if not hasattr(cls,"_available"):
             try:
                 import mad,ao
@@ -277,14 +292,32 @@ def autodetect_backend():
     return defaultapp_backend()
 
 
-def get_backends(available=True, unavailable=False):
-    show = lambda a: (a.available() and available) or (not a.available() and unavailable)
-    no_desc = u'No description given'
-    message = lambda a: a.available() and (a.__doc__.strip() or no_desc) or (a.unavailable_message.strip() or no_desc)
-    title = lambda a: a.__name__[:-len('_backend')].ljust(20)
+def installed_backends():
+    """ Return installed backends, classified in available or unavailable. """
+    # TODO: return in the order they are autodetected
     backends = Backend.__subclasses__()
-    return [(title(backend), message(backend)) for backend in backends if show(backend) ] 
-    
+    available = tuple(cls for cls in backends if cls.available())
+    unavailable = tuple(cls for cls in backends if not cls.available())
+    return available, unavailable
+
+
+def backends_help(extended=True):
+    available, unavailable = installed_backends()
+
+    print u'Available backends:'
+    for backend in available:
+        print '%s %s' % (backend.name().ljust(20), backend.info())
+
+    if not extended: return
+
+    print
+    print u'Unavailable backends:'
+    for backend in unavailable:
+        print '%s %s %s' % (backend.name().ljust(20), backend.info(), backend.availability_info())
+
+    print
+    print (u'To use the unavailable backends you must first supply their dependencies')
+
 
 def main():
     about= (u"Just Wanna Say [Version 2.1]  Copyright (C) 2011 Thomaz Reis and Dirley Rodrigues"
@@ -295,6 +328,9 @@ def main():
     option_list = [
         optparse.make_option('-h', '--help', action='store_true',
             dest='help', default=False, help=u'Show this help.'),
+        optparse.make_option('--list-backends', action='store_true',
+            dest='list_backends', default=False,
+            help=u'List all installed backends.'),
         optparse.make_option('-l', '--language', action='store',
             type='string', dest='language', default='pt',
             help=u'Change the input language.'),
@@ -303,28 +339,26 @@ def main():
             help=u'Specify the audio output mean.'),
         optparse.make_option('-o', '--backend-options', action='store',
             type='string', dest='backend_options', default=None,
-            help=u'Options to be passed to the backend.'),
-        optparse.make_option('-u', '--show-unavailable', action='store_true',
-            dest='show_unavailable', default=False,
-            help=u'Show unavailable backends.') 
+            help=u'Options to be passed to the backend.'), 
     ]
     parser = optparse.OptionParser(usage=usage, option_list=option_list, add_help_option=False)
     options, phrases = parser.parse_args()
-    if options.show_unavailable:
-        print about
-        print
-        print u'Unavailable backends:'
-        for backend in get_backends(available=False, unavailable=True):
-            print '%s %s' %backend
-        return
 
     if options.help:
         print about
         parser.print_help()
         print
-        print u'Available backends:'
-        for backend in get_backends():
-            print '%s %s' %backend
+        backends_help(options.list_backends)
+        return
+    elif options.list_backends:
+        print about
+        print
+        backends_help(True)
+        return
+    elif not phrases:
+        print about
+        print
+        print u'No arguments specified. Please, try -h or --help for usage information.'
         return
 
     if options.backend is not None:
