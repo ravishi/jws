@@ -1,4 +1,21 @@
 # -*- coding: utf-8 -*-
+#    Just Wanna Say - Say what you types using google translate engine
+#    Copyright (C) 2011 Thomaz de Oliveira dos Reis
+#    Copyright (C) 2011 Dirley Rodrigues
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import hashlib
 import optparse
@@ -30,13 +47,17 @@ class Storage(object):
 
 class Backend(object):
     named_file_required = None
+    unavailable_message = ""
 
     def __init__(self, *args):
         pass
 
     def play(self, fp):
         raise NotImplementedError
-
+   
+    @staticmethod
+    def available():
+        return True
 
 class DefaultLoader(Loader):
     def load(self, text, language):
@@ -58,7 +79,7 @@ class TempfileStorage(Storage):
     fmap = {}
 
     def store(self, identifier, fp):
-        tf = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+        tf = open(tempfile.mktemp(suffix='.mp3'), 'w')
         tf.write(fp.read())
         tf.close()
 
@@ -83,15 +104,40 @@ class TempfileStorage(Storage):
         if fname is not None:
             os.unlink(fname)
 
+class appkit_backend(Backend):
+    """ An Apple's AppKit powered backend. """
+    named_file_required = True
+    unavailable_message = "Requires Apple AppKit available on MacOS X"
 
-class StdoutBackend(Backend):
-    """ Um backend que manda o áudio para o stdout. """
+    def play(self, fp):
+        from AppKit import NSSound
+        from time import sleep
+        sound = NSSound.alloc()
+        sound.initWithContentsOfFile_byReference_(fp.name, True)
+        sound.play()
+        while sound.isPlaying():
+          sleep(1)
+
+    @classmethod
+    def available(cls):
+        if not hasattr(cls,"_available"):
+            try:
+                import AppKit
+            except ImportError:
+                cls._available = False
+            else:
+                cls._available = True 
+
+        return cls._available
+
+class stdout_backend(Backend):
+    """ A backend that prints the output to stdout. """
     def play(self, fp):
         print fp.read()
 
 
-class ExternalProgramBackend(Backend):
-    """ Um backend que usa programas externos para tocar o áudio. """
+class external_backend(Backend):
+    """ A backend that uses a external program to play the audio. """
     named_file_required = True
 
     def __init__(self, command):
@@ -104,17 +150,19 @@ class ExternalProgramBackend(Backend):
         os.system(command % (fp.name,))
 
 
-class DefaultAppBackend(ExternalProgramBackend):
-    """ Tenta usar a aplicação padrão do sistema operacional. """
+class defaultapp_backend(external_backend):
+    """ Try to use your default application as backend. """
     def __init__(self, *args):
         cmd = {'darwin': 'open %s',
                'win32': 'cmd /c "start %s"',
                'linux2': 'xdg-open %s'}.get(sys.platform)
-        super(DefaultAppBackend, self).__init__(cmd)
+        super(defaultapp_backend, self).__init__(cmd)
 
 
-class PyAudioBackend(Backend):
-    """ Um backend que utiliza o PyAudio para tocar o áudio. """
+class pyaudio_backend(Backend):
+    """ A PortAudio and PyMAD powered backend """
+    unavailable_message = "Requires PyMad (http://spacepants.org/src/pymad/) and PyAudio (http://people.csail.mit.edu/hubert/pyaudio/)"
+
     def play(self, fp):
         import mad, pyaudio
 
@@ -133,9 +181,22 @@ class PyAudioBackend(Backend):
         stream.close()
         p.terminate()
 
+    @classmethod
+    def available(cls):
+        if not hasattr(cls,"_available"):
+            try:
+                import mad,pyaudio
+            except ImportError:
+                cls._available = False
+            else:
+                cls._available = True 
 
-class AoBackend(Backend):
-    """ Um backend que utiliza o libao para tocar o áudio. """
+        return cls._available
+
+class ao_backend(Backend):
+    """A LibAO and PyMAD powered backend """
+    unavailable_message = "Requires PyMad (http://spacepants.org/src/pymad/) and PyAO (http://ekyo.nerim.net/software/pyogg/)"
+
     def __init__(self, backend=None):
         self.backend = backend
 
@@ -165,6 +226,18 @@ class AoBackend(Backend):
                 break
             dev.play(buf, len(buf))
 
+    @classmethod
+    def available(cls):
+        if not hasattr(cls,"_available"):
+            try:
+                import mad,ao
+            except ImportError:
+                cls._available = False
+            else:
+                cls._available = True 
+
+        return cls._available
+
 
 def autodetect_external_program():
     external_programs = (
@@ -181,62 +254,81 @@ def autodetect_external_program():
                 return command
 
 def autodetect_backend():
+    # test for appkit
+    if appkit_backend.available():
+        return appkit_backend()
+
     # test for pyaudio
-    try:
-        import pyaudio
-    except ImportError:
-        pass
-    else:
-        return PyAudioBackend()
+    if pyaudio_backend.available():
+        return pyaudio_backend()
 
     # test for external programs
     cmd = autodetect_external_program()
     if cmd is not None:
-        return ExternalProgramBackend(cmd)
+        return external_backend(cmd)
 
     # test for ao
-    try:
-        import ao
-    except ImportError:
-        pass
-    else:
-        return AoBackend()
+    if ao_backend.available():
+        return ao_backend()
 
     # usar o programa padrão do sistema para tocar áudio
-    print (u'Nenhum backend foi encontrado. Tentaremos tocar o áudio'
-           u' usando o programa padrão do seu sistema operacional.')
-    return DefaultAppBackend()
+    print (u'No backend was found. Trying to play'
+           u' using your default application')
+    return defaultapp_backend()
 
+
+def get_backends(available=True, unavailable=False):
+    show = lambda a: (a.available() and available) or (not a.available() and unavailable)
+    no_desc = u'No description given'
+    message = lambda a: a.available() and (a.__doc__.strip() or no_desc) or (a.unavailable_message.strip() or no_desc)
+    title = lambda a: a.__name__[:-len('_backend')].ljust(20)
+    backends = Backend.__subclasses__()
+    return [(title(backend), message(backend)) for backend in backends if show(backend) ] 
+    
 
 def main():
-    print "Just wanna say [version 2.0]\n"
+    about= (u"Just Wanna Say [Version 2.1]  Copyright (C) 2011 Thomaz Reis and Dirley Rodrigues"
+           u"\nThis program comes with ABSOLUTELY NO WARRANTY;"
+           u"\nThis is free software, and you are welcome to redistribute it under certain conditions;") 
+
     usage = 'usage: %prog [options] [phrases]'
     option_list = [
         optparse.make_option('-h', '--help', action='store_true',
-            dest='help', default=False, help=u'Show this help'),
+            dest='help', default=False, help=u'Show this help.'),
         optparse.make_option('-l', '--language', action='store',
             type='string', dest='language', default='pt',
-            help=u'Change the input language'),
+            help=u'Change the input language.'),
         optparse.make_option('-b', '--backend', action='store',
             type='string', dest='backend', default=None,
-            help=u'Specify the audio output mean'),
+            help=u'Specify the audio output mean.'),
         optparse.make_option('-o', '--backend-options', action='store',
             type='string', dest='backend_options', default=None,
-            help=u'Options to be passed to the backend'),
+            help=u'Options to be passed to the backend.'),
+        optparse.make_option('-u', '--show-unavailable', action='store_true',
+            dest='show_unavailable', default=False,
+            help=u'Show unavailable backends.') 
     ]
     parser = optparse.OptionParser(usage=usage, option_list=option_list, add_help_option=False)
     options, phrases = parser.parse_args()
+    if options.show_unavailable:
+        print about
+        print
+        print u'Unavailable backends:'
+        for backend in get_backends(available=False, unavailable=True):
+            print '%s %s' %backend
+        return
 
     if options.help:
+        print about
         parser.print_help()
         print
         print u'Available backends:'
-        for cls in Backend.__subclasses__():
-            print '%s %s' % (cls.__name__[:-len('Backend')].ljust(20), (cls.__doc__ or u'No description given').strip())
+        for backend in get_backends():
+            print '%s %s' %backend
         return
 
     if options.backend is not None:
-        backend = globals().get('%sBackend' % (options.backend,))(options.backend_options)
+        backend = globals().get('%s_backend' % (options.backend.lower(),))(options.backend_options)
     elif options.backend_options is not None:
         print u'Você especificou as opções, mas não especificou os backends.'
         return
