@@ -155,8 +155,25 @@ class external_backend(Backend):
     """ A backend that uses a external program to play the audio. """
     named_file_required = True
 
-    def __init__(self, command):
+    def __init__(self, command=""):
+        if not command:
+           command = self.autodetect_external_program()
         self.command = command
+    
+    @staticmethod
+    def autodetect_external_program():
+        external_programs = (
+            ('mpg123', 'mplayer %s >/dev/null 2>&1'),
+            ('playsound', 'playsound %s >/dev/null 2>&1'),
+            ('mplayer', 'mplayer %s >/dev/null 2>&1'),
+        )
+        def is_exe(fpath):
+            return os.path.exists(fpath) and os.access(fpath, os.X_OK)
+
+        for program, command in external_programs:
+            for path in os.environ['PATH'].split(os.pathsep):
+                if is_exe(os.path.join(path, program)):
+                    return command
 
     def play(self, fp):
         command = self.command
@@ -175,7 +192,7 @@ class defaultapp_backend(external_backend):
 
 
 class pyaudio_backend(Backend):
-    """ A PortAudio and PyMAD powered backend """
+    """ A PortAudio and PyMAD powered backend. """
 
     def play(self, fp):
         import mad, pyaudio
@@ -253,21 +270,6 @@ class ao_backend(Backend):
 
         return cls._available
 
-
-def autodetect_external_program():
-    external_programs = (
-        ('mpg123', 'mplayer %s >/dev/null 2>&1'),
-        ('playsound', 'playsound %s >/dev/null 2>&1'),
-        ('mplayer', 'mplayer %s >/dev/null 2>&1'),
-    )
-    def is_exe(fpath):
-        return os.path.exists(fpath) and os.access(fpath, os.X_OK)
-
-    for program, command in external_programs:
-        for path in os.environ['PATH'].split(os.pathsep):
-            if is_exe(os.path.join(path, program)):
-                return command
-
 def autodetect_backend():
     # test for appkit
     if appkit_backend.available():
@@ -278,7 +280,7 @@ def autodetect_backend():
         return pyaudio_backend()
 
     # test for external programs
-    cmd = autodetect_external_program()
+    cmd = external_backend.autodetect_external_program()
     if cmd is not None:
         return external_backend(cmd)
 
@@ -295,7 +297,13 @@ def autodetect_backend():
 def installed_backends():
     """ Return installed backends, classified in available or unavailable. """
     # TODO: return in the order they are autodetected
-    backends = Backend.__subclasses__()
+    def recursive_backends(classes):
+        result = classes
+        for cls in classes:
+            result += recursive_backends(cls.__subclasses__())
+        return result
+        
+    backends = recursive_backends(Backend.__subclasses__())
     available = tuple(cls for cls in backends if cls.available())
     unavailable = tuple(cls for cls in backends if not cls.available())
     return available, unavailable
@@ -313,7 +321,7 @@ def backends_help(extended=True):
     print
     print u'Unavailable backends:'
     for backend in unavailable:
-        print '%s %s %s' % (backend.name().ljust(20), backend.info(), backend.availability_info())
+        print '%s %s \n %s' % (backend.name().ljust(20), backend.info(), " "*20+backend.availability_info())
 
     print
     print (u'To use the unavailable backends you must first supply their dependencies')
@@ -371,6 +379,13 @@ def main():
 
     text = (u' '.join([i.decode('utf-8') for i in phrases]) or u'JWS, o falador.')
 
+    #Just Wanna Have Fun :)
+    if text == "Does JWS has any easter eggs?":
+       if options.language == "pt":
+           text = u"Infelizmente não tem nenhum ister égui nesse programa."
+       else:
+           text = u"Unfortunately there is no easter egg in this program."
+           
     loader = DefaultLoader()
     lfp = loader.load(text, options.language)
 
