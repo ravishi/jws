@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #    Just Wanna Say - Say what you types using google translate engine
 #    Copyright (C) 2011 Thomaz de Oliveira dos Reis
@@ -372,7 +373,7 @@ def main():
     if options.backend is not None:
         backend = globals().get('%s_backend' % (options.backend.lower(),))(options.backend_options)
     elif options.backend_options is not None:
-        print u'Você especificou as opções, mas não especificou os backends.'
+        print u'You specified backend options but no backend.'
         return
     else:
         backend = autodetect_backend()
