@@ -80,10 +80,10 @@ class DefaultLoader(Loader):
         """ ``text`` must be unicode. ``language`` doesn't. """
         data = {
             'tl': language,
-            'q': text.encode('utf-8'),
+            'q': text.encode(sys.stdin.encoding),
         }
 
-        url = u'http://translate.google.com/translate_tts?' + urllib.urlencode(data)
+        url = 'http://translate.google.com/translate_tts?' + urllib.urlencode(data)
         request = urllib2.Request(url)
         request.add_header('User-Agent', 'Mozilla/5.0')
 
@@ -95,7 +95,7 @@ class TempfileStorage(Storage):
     fmap = {}
 
     def store(self, identifier, fp):
-        tf = open(tempfile.mktemp(suffix='.mp3'), 'w')
+        tf = open(tempfile.mktemp(suffix='.mp3'), 'wb')
         tf.write(fp.read())
         tf.close()
 
@@ -351,7 +351,8 @@ def main():
             help=u'Options to be passed to the backend.'), 
     ]
     parser = optparse.OptionParser(usage=usage, option_list=option_list, add_help_option=False)
-    options, phrases = parser.parse_args()
+
+    options, arguments = parser.parse_args()
 
     if options.help:
         print about
@@ -364,7 +365,7 @@ def main():
         print
         backends_help(True)
         return
-    elif not phrases:
+    elif not arguments:
         print about
         print
         print u'No arguments specified. Please, try -h or --help for usage information.'
@@ -378,7 +379,7 @@ def main():
     else:
         backend = autodetect_backend()
 
-    text = (u' '.join([i.decode('utf-8') for i in phrases]) or u'JWS, o falador.')
+    text = u' '.join([i.decode(sys.stdin.encoding) for i in arguments])
 
     #Just Wanna Have Fun :)
     if text == "Does JWS has any easter eggs?":
