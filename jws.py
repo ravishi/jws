@@ -17,13 +17,15 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
+import ctypes
 import hashlib
 import optparse
+import os
+import sys
+import tempfile
+import time
 import urllib
 import urllib2
-import tempfile
-import sys
 
 
 class Loader(object):
@@ -80,7 +82,7 @@ class DefaultLoader(Loader):
         """ ``text`` must be unicode. ``language`` doesn't. """
         data = {
             'tl': language,
-            'q': text.encode(sys.stdin.encoding),
+            'q': text.encode(sys.stdin.encoding or 'utf-8'),
         }
 
         url = 'http://translate.google.com/translate_tts?' + urllib.urlencode(data)
@@ -126,12 +128,11 @@ class appkit_backend(Backend):
 
     def play(self, fp):
         from AppKit import NSSound
-        from time import sleep
         sound = NSSound.alloc()
         sound.initWithContentsOfFile_byReference_(fp.name, True)
         sound.play()
         while sound.isPlaying():
-          sleep(1)
+          time.sleep(1)
 
     @classmethod
     def available(cls):
@@ -271,7 +272,74 @@ class ao_backend(Backend):
 
         return cls._available
 
+
+## win32
+
+class Win32AudioClip(object):
+    """A simple win32 audio clip. Inspired by mp3play (http://pypi.python.org/pypi/mp3play/)"""
+
+    def __init__(self, fname):
+        self.fname = fname
+        self._alias = 'mp3_%s' % (id(self),)
+
+        self._send(r'open "%s" alias %s' % (fname, self._alias))
+        self._send('set %s time format milliseconds' % (self._alias,))
+
+        length = self._send('status %s length' % (self._alias,))
+        self._length = int(length)
+
+    def _get_mci(self):
+        if not hasattr(self, '_win32mci'):
+            self._win32mci = ctypes.windll.winmm.mciSendStringA
+        return self._win32mci
+
+    _mci = property(_get_mci)
+
+    def _send(self, command):
+        buf = ctypes.c_buffer(255)
+        ret = self._mci(str(command), buf, 254, 0)
+        if ret:
+            err = int(ret)
+            err_buf = ctypes.c_buffer(255)
+            self._mci(err, err_buf, 254)
+            raise RuntimeError("Error %d: %s" % (err, err_buf.vale))
+        else:
+            return buf.value
+
+    def play(self, start=None, end=None):
+        start = start or 0
+        end = end or self._length
+        self._send('play %s from %d to %d' % (self._alias, start, end))
+
+    def isplaying(self):
+        return 'playing' == self._send('status %s mode' % self._alias)
+
+    def __del__(self):
+        self._send('close %s' % (self._alias,))
+
+
+class win32_backend(Backend):
+    """The simplest backend available for Windows XP"""
+    named_file_required = True
+
+    def play(self, fp):
+        clip = Win32AudioClip(fp.name)
+        clip.play()
+        while clip.isplaying():
+            time.sleep(1)
+
+    @classmethod
+    def available(cls):
+        """Runs on Windows XP or greater (?)"""
+        # TODO try to play a micro-clip and check if it works.
+        return sys.platform == 'win32'
+
+
 def autodetect_backend():
+    # windows?
+    if win32_backend.available():
+        return win32_backend()
+
     # test for appkit
     if appkit_backend.available():
         return appkit_backend()
@@ -379,7 +447,7 @@ def main():
     else:
         backend = autodetect_backend()
 
-    text = u' '.join([i.decode(sys.stdin.encoding) for i in arguments])
+    text = u' '.join([i.decode(sys.stdin.encoding or 'utf-8') for i in arguments])
 
     #Just Wanna Have Fun :)
     if text == "Does JWS has any easter eggs?":
