@@ -272,28 +272,16 @@ class ao_backend(Backend):
 
         return cls._available
 
-
-## win32
-
 class Win32AudioClip(object):
-    """A simple win32 audio clip. Inspired by mp3play (http://pypi.python.org/pypi/mp3play/)"""
+    """ A simple win32 audio clip. Inspired by mp3play (http://pypi.python.org/pypi/mp3play/) """
 
     def __init__(self, fname):
-        self.fname = fname
         self._alias = 'mp3_%s' % (id(self),)
-
+        self._mci = ctypes.windll.winmm.mciSendStringA
         self._send(r'open "%s" alias %s' % (fname, self._alias))
         self._send('set %s time format milliseconds' % (self._alias,))
-
         length = self._send('status %s length' % (self._alias,))
         self._length = int(length)
-
-    def _get_mci(self):
-        if not hasattr(self, '_win32mci'):
-            self._win32mci = ctypes.windll.winmm.mciSendStringA
-        return self._win32mci
-
-    _mci = property(_get_mci)
 
     def _send(self, command):
         buf = ctypes.c_buffer(255)
@@ -306,10 +294,8 @@ class Win32AudioClip(object):
         else:
             return buf.value
 
-    def play(self, start=None, end=None):
-        start = start or 0
-        end = end or self._length
-        self._send('play %s from %d to %d' % (self._alias, start, end))
+    def play(self):
+        self._send('play %s from %d to %d' % (self._alias, 0, self._length))
 
     def isplaying(self):
         return 'playing' == self._send('status %s mode' % self._alias)
@@ -319,7 +305,7 @@ class Win32AudioClip(object):
 
 
 class win32_backend(Backend):
-    """The simplest backend available for Windows XP"""
+    """ The simplest backend available for Windows XP """
     named_file_required = True
 
     def play(self, fp):
@@ -330,13 +316,12 @@ class win32_backend(Backend):
 
     @classmethod
     def available(cls):
-        """Runs on Windows XP or greater (?)"""
-        # TODO try to play a micro-clip and check if it works.
+        """ Runs on Windows XP or newer (?) """
         return sys.platform == 'win32'
 
 
 def autodetect_backend():
-    # windows?
+    # test for win32 backend
     if win32_backend.available():
         return win32_backend()
 
@@ -357,7 +342,7 @@ def autodetect_backend():
     if ao_backend.available():
         return ao_backend()
 
-    # usar o programa padrão do sistema para tocar áudio
+    # using default app as backend
     print (u'No backend was found. Trying to play'
            u' using your default application')
     return defaultapp_backend()
