@@ -17,6 +17,7 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import re
 import ctypes
 import hashlib
 import optparse
@@ -26,6 +27,12 @@ import tempfile
 import time
 import urllib
 import urllib2
+from itertools import chain
+
+
+def camelcase_to_underscore(name):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
 class Loader(object):
@@ -50,13 +57,14 @@ class Storage(object):
 
 class Backend(object):
     named_file_required = None
+    standard = False
 
     def __init__(self, *args):
         pass
 
     def play(self, fp):
         raise NotImplementedError
-   
+
     @staticmethod
     def available():
         """ Subclasses must extend this method to tell the caller if they are
@@ -65,7 +73,10 @@ class Backend(object):
 
     @classmethod
     def name(cls):
-        return cls.__name__[:-len('_backend')]
+        name = camelcase_to_underscore(cls.__name__)
+        if name.endswith('_backend'):
+            name = name[:-len('_backend')]
+        return name
 
     @classmethod
     def info(cls):
@@ -76,6 +87,7 @@ class Backend(object):
         doc = cls.available.__doc__
         if not doc is Backend.available.__doc__:
             return doc.strip()
+
 
 class DefaultLoader(Loader):
     def load(self, text, language):
@@ -122,9 +134,11 @@ class TempfileStorage(Storage):
         if fname is not None:
             os.unlink(fname)
 
-class appkit_backend(Backend):
+
+class AppkitBackend(Backend):
     """ An Apple's AppKit powered backend. """
     named_file_required = True
+    standard = True
 
     def play(self, fp):
         from AppKit import NSSound
@@ -143,25 +157,27 @@ class appkit_backend(Backend):
             except ImportError:
                 cls._available = False
             else:
-                cls._available = True 
+                cls._available = True
 
         return cls._available
 
-class stdout_backend(Backend):
+
+class StdoutBackend(Backend):
     """ A backend that prints the output to stdout. """
     def play(self, fp):
         print fp.read()
 
 
-class external_backend(Backend):
+class ExternalCommandBackend(Backend):
     """ A backend that uses a external program to play the audio. """
     named_file_required = True
+    standard = True
 
-    def __init__(self, command=""):
+    def __init__(self, command=None):
         if not command:
            command = self.autodetect_external_program()
         self.command = command
-    
+
     @staticmethod
     def autodetect_external_program():
         external_programs = (
@@ -177,6 +193,12 @@ class external_backend(Backend):
                 if is_exe(os.path.join(path, program)):
                     return command
 
+    @classmethod
+    def available(cls):
+        if not hasattr(cls, '_exe'):
+            cls._exe = cls.autodetect_external_program()
+        return cls._exe is not None
+
     def play(self, fp):
         command = self.command
         if not '%s' in self.command:
@@ -184,17 +206,20 @@ class external_backend(Backend):
         os.system(command % (fp.name,))
 
 
-class defaultapp_backend(external_backend):
+class DefaultAppBackend(ExternalCommandBackend):
     """ Try to use your default application as backend. """
+    standard = True
+
     def __init__(self, *args):
         cmd = {'darwin': 'open %s',
                'win32': 'cmd /c "start %s"',
                'linux2': 'xdg-open %s'}.get(sys.platform)
-        super(defaultapp_backend, self).__init__(cmd)
+        super(DefaultAppBackend, self).__init__(cmd)
 
 
-class pyaudio_backend(Backend):
+class PyAudioBackend(Backend):
     """ A PortAudio and PyMAD powered backend. """
+    standard = True
 
     def play(self, fp):
         import mad, pyaudio
@@ -223,12 +248,13 @@ class pyaudio_backend(Backend):
             except ImportError:
                 cls._available = False
             else:
-                cls._available = True 
+                cls._available = True
 
         return cls._available
 
-class ao_backend(Backend):
+class AoBackend(Backend):
     """A LibAO and PyMAD powered backend. """
+    standard = True
 
     def __init__(self, backend=None):
         self.backend = backend
@@ -268,9 +294,10 @@ class ao_backend(Backend):
             except ImportError:
                 cls._available = False
             else:
-                cls._available = True 
+                cls._available = True
 
         return cls._available
+
 
 class Win32AudioClip(object):
     """ A simple win32 audio clip. Inspired by mp3play (http://pypi.python.org/pypi/mp3play/) """
@@ -304,9 +331,10 @@ class Win32AudioClip(object):
         self._send('close %s' % (self._alias,))
 
 
-class win32_backend(Backend):
+class Win32Backend(Backend):
     """ The simplest backend available for Windows XP """
     named_file_required = True
+    standard = True
 
     def play(self, fp):
         clip = Win32AudioClip(fp.name)
@@ -321,31 +349,12 @@ class win32_backend(Backend):
 
 
 def autodetect_backend():
-    # test for win32 backend
-    if win32_backend.available():
-        return win32_backend()
-
-    # test for appkit
-    if appkit_backend.available():
-        return appkit_backend()
-
-    # test for pyaudio
-    if pyaudio_backend.available():
-        return pyaudio_backend()
-
-    # test for external programs
-    cmd = external_backend.autodetect_external_program()
-    if cmd is not None:
-        return external_backend(cmd)
-
-    # test for ao
-    if ao_backend.available():
-        return ao_backend()
-
-    # using default app as backend
-    print (u'No backend was found. Trying to play'
-           u' using your default application')
-    return defaultapp_backend()
+    available, unavailable = installed_backends()
+    standard = (bak for bak in available if bak.standard)
+    try:
+        return next(iter(standard))()
+    except StopIteration:
+        pass
 
 
 def installed_backends():
@@ -356,7 +365,7 @@ def installed_backends():
         for cls in classes:
             result += recursive_backends(cls.__subclasses__())
         return result
-        
+
     backends = recursive_backends(Backend.__subclasses__())
     available = tuple(cls for cls in backends if cls.available())
     unavailable = tuple(cls for cls in backends if not cls.available())
@@ -383,8 +392,8 @@ def backends_help(extended=True):
 
 def main():
     about= (u"Just Wanna Say [Version 2.1]  Copyright (C) 2011 Thomaz Reis and Dirley Rodrigues"
-           u"\nThis program comes with ABSOLUTELY NO WARRANTY;"
-           u"\nThis is free software, and you are welcome to redistribute it under certain conditions;") 
+            u"\nThis program comes with ABSOLUTELY NO WARRANTY;"
+            u"\nThis is free software, and you are welcome to redistribute it under certain conditions;")
 
     usage = 'usage: %prog [options] [phrases]'
     option_list = [
@@ -401,7 +410,7 @@ def main():
             help=u'Specify the audio output mean.'),
         optparse.make_option('-o', '--backend-options', action='store',
             type='string', dest='backend_options', default=None,
-            help=u'Options to be passed to the backend.'), 
+            help=u'Options to be passed to the backend.'),
     ]
     parser = optparse.OptionParser(usage=usage, option_list=option_list, add_help_option=False)
 
@@ -424,11 +433,17 @@ def main():
         print u'No arguments specified. Please, try -h or --help for usage information.'
         return
 
-    if options.backend is not None:
-        backend = globals().get('%s_backend' % (options.backend.lower(),))(options.backend_options)
-    elif options.backend_options is not None:
+    if options.backend_options is not None:
         print u'You specified backend options but no backend.'
         return
+    elif options.backend is not None:
+        backends = tuple(chain(*installed_backends()))
+        backends = dict((bak.name(), bak) for bak in backends)
+        backend = backends.get(options.backend)
+
+        if backend is None:
+            print u'"%s" is not a valid backend' % options.backend
+            return
     else:
         backend = autodetect_backend()
 
@@ -440,7 +455,7 @@ def main():
            text = u"Infelizmente não tem nenhum ister égui nesse programa."
        else:
            text = u"Unfortunately there is no easter egg in this program."
-           
+
     loader = DefaultLoader()
     lfp = loader.load(text, options.language)
 
