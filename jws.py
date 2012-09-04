@@ -185,9 +185,8 @@ class ExternalCommandBackend(Backend):
             ('playsound', 'playsound %s >/dev/null 2>&1'),
             ('mplayer', 'mplayer %s >/dev/null 2>&1'),
         )
-        def is_exe(fpath):
-            return os.path.exists(fpath) and os.access(fpath, os.X_OK)
-
+        is_exe = lambda fpath: os.path.exists(fpath) and os.access(fpath, os.X_OK)
+        
         for program, command in external_programs:
             for path in os.environ['PATH'].split(os.pathsep):
                 if is_exe(os.path.join(path, program)):
@@ -350,12 +349,9 @@ class Win32Backend(Backend):
 
 def autodetect_backend():
     available, unavailable = installed_backends()
-    standard = (bak for bak in available if bak.standard)
-    try:
-        return next(iter(standard))()
-    except StopIteration:
-        pass
-
+    for bak in available:
+        if bak.standard:
+            return bak()
 
 def installed_backends():
     """ Return installed backends, classified in available or unavailable. """
