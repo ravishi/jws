@@ -203,9 +203,6 @@ class ExternalCommandBackend(Backend):
         if not '%s' in self.command:
             command = self.command + ' %s'
 
-        print command, fp.name
-        #proc = subprocess.Popen([command, fp.name])
-
         os.system(command % (fp.name,))
 
 
