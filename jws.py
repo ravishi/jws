@@ -86,7 +86,7 @@ class Backend(object):
     def availability_info(cls):
         doc = cls.available.__doc__
         if not doc is Backend.available.__doc__:
-            return doc.strip()
+            return (doc or u'').strip()
 
 
 class DefaultLoader(Loader):
@@ -181,12 +181,12 @@ class ExternalCommandBackend(Backend):
     @staticmethod
     def autodetect_external_program():
         external_programs = (
-            ('mpg123', 'mplayer %s >/dev/null 2>&1'),
-            ('playsound', 'playsound %s >/dev/null 2>&1'),
-            ('mplayer', 'mplayer %s >/dev/null 2>&1'),
+            ('mpg123', 'mpg123 "%s" > /dev/null 2>&1'),
+            ('playsound', 'playsound "%s" > /dev/null 2>&1'),
+            ('mplayer', 'mplayer "%s" > /dev/null 2>&1'),
         )
         is_exe = lambda fpath: os.path.exists(fpath) and os.access(fpath, os.X_OK)
-        
+
         for program, command in external_programs:
             for path in os.environ['PATH'].split(os.pathsep):
                 if is_exe(os.path.join(path, program)):
@@ -202,6 +202,10 @@ class ExternalCommandBackend(Backend):
         command = self.command
         if not '%s' in self.command:
             command = self.command + ' %s'
+
+        print command, fp.name
+        #proc = subprocess.Popen([command, fp.name])
+
         os.system(command % (fp.name,))
 
 
@@ -271,9 +275,9 @@ class AoBackend(Backend):
             }.get(sys.platform)
 
         if backend is None:
-            raise Exception("Can't guess a usable libao baceknd."
-                            "If you know a backend that may work on your system then"
-                            "you can specify it using the backend options parameter.")
+            raise Exception("Can't guess a usable libao backend."
+                            " If you know a backend that may work on your system then"
+                            " you can specify it using the backend options parameter.")
 
         mf = mad.MadFile(fp)
         dev = ao.AudioDevice(backend)
@@ -351,7 +355,7 @@ def autodetect_backend():
     available, unavailable = installed_backends()
     for bak in available:
         if bak.standard:
-            return bak()
+            return bak
 
 def installed_backends():
     """ Return installed backends, classified in available or unavailable. """
@@ -443,6 +447,8 @@ def main():
     else:
         backend = autodetect_backend()
 
+    backend = backend()
+
     text = u' '.join([i.decode(sys.stdin.encoding or 'utf-8') for i in arguments])
 
     #Just Wanna Have Fun :)
@@ -453,6 +459,7 @@ def main():
            text = u"Unfortunately there is no easter egg in this program."
 
     loader = DefaultLoader()
+
     lfp = loader.load(text, options.language)
 
     if backend.named_file_required:
